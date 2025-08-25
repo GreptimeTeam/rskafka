@@ -5,7 +5,7 @@ use rskafka::{
     client::{
         ClientBuilder,
         error::{Error as ClientError, ProtocolError, ServerErrorResponse},
-        partition::{Compression, OffsetAt, UnknownTopicHandling},
+        partition::{Compression, FetchResult, OffsetAt, UnknownTopicHandling},
         producer::ProduceResult,
     },
     record::{Record, RecordAndOffset},
@@ -299,7 +299,11 @@ async fn test_socks5() {
         .await
         .unwrap();
 
-    let (mut records, _watermark) = partition_client
+    let FetchResult {
+        mut records,
+        high_watermark: _,
+        ..
+    } = partition_client
         .fetch_records(0, 1..10_000_001, 1_000)
         .await
         .unwrap();
@@ -358,7 +362,11 @@ async fn test_consume_empty() {
         .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
         .await
         .unwrap();
-    let (records, watermark) = partition_client
+    let FetchResult {
+        records,
+        high_watermark: watermark,
+        ..
+    } = partition_client
         .fetch_records(0, 1..10_000, 1_000)
         .await
         .unwrap();
@@ -584,7 +592,11 @@ async fn test_produce_consume_size_cutoff() {
         let record_2 = record_2.clone();
 
         async move {
-            let (records, _high_watermark) = partition_client
+            let FetchResult {
+                records,
+                high_watermark: _,
+                ..
+            } = partition_client
                 .fetch_records(0, 1..limit, 1_000)
                 .await
                 .unwrap();
@@ -649,7 +661,11 @@ async fn test_consume_midbatch() {
 
     // when fetching from the middle of the record batch, the server will return both records but we should filter out
     // the first one on the client side
-    let (records, _watermark) = partition_client
+    let FetchResult {
+        records,
+        high_watermark: _,
+        ..
+    } = partition_client
         .fetch_records(offset_2, 1..10_000, 1_000)
         .await
         .unwrap();
@@ -752,7 +768,11 @@ async fn test_delete_records() {
 
     // fetching untouched records still works, however the middle record batch is NOT half-deleted and still contains
     // record_2. `fetch_records` should filter this however.
-    let (records, _watermark) = partition_client
+    let FetchResult {
+        records,
+        high_watermark: _,
+        ..
+    } = partition_client
         .fetch_records(offset_3, 1..10_000, 1_000)
         .await
         .unwrap();

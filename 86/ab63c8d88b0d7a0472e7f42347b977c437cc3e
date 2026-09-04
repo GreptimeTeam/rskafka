@@ -1,0 +1,16 @@
+src/client/mod.rs
+  h_623774b620da8e 122-123
+src/messenger.rs
+  h_623774b620da8e 417-428,431-434,461-471,1149-1220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "86ab63c8d88b0d7a0472e7f42347b977c437cc3e",
+  "prompts": {},
+  "humans": {
+    "h_623774b620da8e": {
+      "author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}

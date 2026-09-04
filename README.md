@@ -31,7 +31,7 @@ It will be a good fit for workloads that:
 use rskafka::{
     client::{
         ClientBuilder,
-        partition::{Compression, UnknownTopicHandling},
+        partition::{Compression, FetchResult, UnknownTopicHandling},
     },
     record::Record,
 };
@@ -74,14 +74,18 @@ let record = Record {
 partition_client.produce(vec![record], Compression::default()).await.unwrap();
 
 // consume data
-let (records, high_watermark) = partition_client
+let FetchResult {
+    records,
+    high_watermark,
+    ..
+} = partition_client
     .fetch_records(
         0,  // offset
         1..1_000_000,  // min..max bytes
         1_000,  // max wait time
     )
-   .await
-   .unwrap();
+    .await
+    .unwrap();
 # }
 ```
 

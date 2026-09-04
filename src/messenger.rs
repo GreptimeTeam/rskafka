@@ -1184,13 +1184,15 @@ mod tests {
         assert_matches!(err, RequestError::Poisoned(_));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_request_timeout_includes_send() {
         let (mut peer, stream) = tokio::io::duplex(1);
+        let (request_read_tx, request_read_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel();
         let read_request = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(30)).await;
             peer.read_message(1_000).await.unwrap();
+            request_read_tx.send(()).unwrap();
             let _ = release_rx.await;
         });
         let mut messenger = Messenger::new(
@@ -1204,15 +1206,22 @@ mod tests {
             ListOffsetsRequest::API_VERSION_RANGE,
         )]));
 
-        let request = messenger.request(ListOffsetsRequest {
-            replica_id: NORMAL_CONSUMER,
-            isolation_level: None,
-            topics: vec![],
+        let request = tokio::spawn(async move {
+            messenger
+                .request(ListOffsetsRequest {
+                    replica_id: NORMAL_CONSUMER,
+                    isolation_level: None,
+                    topics: vec![],
+                })
+                .await
         });
-        let err = tokio::time::timeout(Duration::from_millis(70), request)
-            .await
-            .expect("request timeout should include the send phase")
-            .unwrap_err();
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(30)).await;
+        request_read_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+
+        let err = request.await.unwrap().unwrap_err();
         assert_matches!(err, RequestError::IO(error) if error.kind() == std::io::ErrorKind::TimedOut);
         release_tx.send(()).unwrap();
         read_request.await.unwrap();

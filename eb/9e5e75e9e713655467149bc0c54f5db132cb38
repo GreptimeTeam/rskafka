@@ -1,0 +1,16 @@
+Cargo.toml
+  h_623774b620da8e 51
+src/messenger.rs
+  h_623774b620da8e 1185,1188,1193,1207-1214,1216-1222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "eb9e5e75e9e713655467149bc0c54f5db132cb38",
+  "prompts": {},
+  "humans": {
+    "h_623774b620da8e": {
+      "author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}

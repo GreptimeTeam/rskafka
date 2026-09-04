@@ -414,20 +414,24 @@ where
             }
         }
 
-        self.send_message(buf).await?;
+        let deadline = self
+            .timeout
+            .map(|timeout| tokio::time::Instant::now() + timeout);
+
+        let send_result = if let Some(deadline) = deadline {
+            tokio::time::timeout_at(deadline, self.send_message(buf))
+                .await
+                .map_err(|_| self.poison(Self::timeout_error()))?
+        } else {
+            self.send_message(buf).await
+        };
+        send_result?;
         cleanup_on_cancel.message_sent();
 
-        let mut response = if let Some(timeout) = self.timeout {
-            // If a request times out, return a `RequestError::IO` with a timeout error.
-            // This allows the backoff mechanism to detect transport issues and re-establish the connection as needed.
-            //
-            // Typically, timeouts occur due to abrupt TCP connection loss (e.g., a disconnected cable).
-            tokio::time::timeout(timeout, rx).await.map_err(|_| {
-                RequestError::IO(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "Request timed out",
-                ))
-            })?
+        let mut response = if let Some(deadline) = deadline {
+            tokio::time::timeout_at(deadline, rx)
+                .await
+                .map_err(|_| Self::timeout_error())?
         } else {
             rx.await
         }
@@ -452,6 +456,17 @@ where
             encoded_request_size: encoded_size,
             encoded_response_size: response_size,
         })
+    }
+
+    fn timeout_error() -> RequestError {
+        RequestError::IO(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "Request timed out",
+        ))
+    }
+
+    fn poison(&self, error: RequestError) -> RequestError {
+        RequestError::Poisoned(self.state.lock().poison(error))
     }
 
     async fn send_message(&self, msg: Vec<u8>) -> Result<(), RequestError> {
@@ -1129,6 +1144,78 @@ mod tests {
         // sync versions
         let err = messenger.sync_versions().await.unwrap_err();
         assert_matches!(err, SyncVersionsError::NoWorkingVersion);
+    }
+
+    #[tokio::test]
+    async fn test_poison_send_timeout() {
+        let (_peer, stream) = tokio::io::duplex(1);
+        let mut messenger = Messenger::new(
+            stream,
+            1_000,
+            Arc::from(DEFAULT_CLIENT_ID),
+            Some(Duration::from_millis(50)),
+        );
+        messenger.set_version_ranges(HashMap::from([(
+            ApiKey::ListOffsets,
+            ListOffsetsRequest::API_VERSION_RANGE,
+        )]));
+
+        let request = ListOffsetsRequest {
+            replica_id: NORMAL_CONSUMER,
+            isolation_level: None,
+            topics: vec![],
+        };
+        let err = messenger.request(request).await.unwrap_err();
+        match err {
+            RequestError::Poisoned(error) => {
+                assert_matches!(error.as_ref(), RequestError::IO(error) if error.kind() == std::io::ErrorKind::TimedOut);
+            }
+            err => panic!("Expected poisoned messenger, got {err:?}"),
+        }
+
+        let err = messenger
+            .request(ListOffsetsRequest {
+                replica_id: NORMAL_CONSUMER,
+                isolation_level: None,
+                topics: vec![],
+            })
+            .await
+            .unwrap_err();
+        assert_matches!(err, RequestError::Poisoned(_));
+    }
+
+    #[tokio::test]
+    async fn test_request_timeout_includes_send() {
+        let (mut peer, stream) = tokio::io::duplex(1);
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let read_request = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            peer.read_message(1_000).await.unwrap();
+            let _ = release_rx.await;
+        });
+        let mut messenger = Messenger::new(
+            stream,
+            1_000,
+            Arc::from(DEFAULT_CLIENT_ID),
+            Some(Duration::from_millis(50)),
+        );
+        messenger.set_version_ranges(HashMap::from([(
+            ApiKey::ListOffsets,
+            ListOffsetsRequest::API_VERSION_RANGE,
+        )]));
+
+        let request = messenger.request(ListOffsetsRequest {
+            replica_id: NORMAL_CONSUMER,
+            isolation_level: None,
+            topics: vec![],
+        });
+        let err = tokio::time::timeout(Duration::from_millis(70), request)
+            .await
+            .expect("request timeout should include the send phase")
+            .unwrap_err();
+        assert_matches!(err, RequestError::IO(error) if error.kind() == std::io::ErrorKind::TimedOut);
+        release_tx.send(()).unwrap();
+        read_request.await.unwrap();
     }
 
     #[tokio::test]

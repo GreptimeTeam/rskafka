@@ -113,7 +113,7 @@ struct CurrentBroker {
     gen_leader_from_self: Option<MetadataCacheGeneration>,
 }
 
-/// The result of the [fetch_records](PartitionClient::fetch_records) call.
+/// The result of [`PartitionClient::fetch_records`].
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct FetchResult {
